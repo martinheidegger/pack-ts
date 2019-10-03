@@ -30,10 +30,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/martinheidegger/pack_ts.git"
+    "url": "git+https://github.com/martinheidegger/pack-ts.git"
   },
   "bugs": {
-    "url": "https://github.com/martinheidegger/pack_ts/issues"
+    "url": "https://github.com/martinheidegger/pack-ts/issues"
   },
-  "homepage": "https://github.com/martinheidegger/pack_ts#readme"
+  "homepage": "https://github.com/martinheidegger/pack-ts#readme"
 }
