@@ -1,0 +1,39 @@
+{
+  "name": "@martinheidegger/pack-ts",
+  "version": "1.0.0",
+  "description": "Optionionated pack script for typescript libraries",
+  "main": "./bin/pack-ts",
+  "scripts": {
+    "lint": "standard"
+  },
+  "bin": {
+    "pack-ts": "./bin/pack-ts"
+  },
+  "keywords": [
+    "cli",
+    "typescript",
+    "build",
+    "pack",
+    "release"
+  ],
+  "author": "Martin Heidegger <martin.heidegger@gmail.com>",
+  "license": "MIT",
+  "dependencies": {
+    "del": "^5.1.0",
+    "ez-spawn": "^2.1.5",
+    "glob": "^7.1.4",
+    "glob-promise": "^3.4.0",
+    "mkdirp-promise": "^5.0.1"
+  },
+  "devDependencies": {
+    "standard": "^14.3.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/martinheidegger/pack_ts.git"
+  },
+  "bugs": {
+    "url": "https://github.com/martinheidegger/pack_ts/issues"
+  },
+  "homepage": "https://github.com/martinheidegger/pack_ts#readme"
+}

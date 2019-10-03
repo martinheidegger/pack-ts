@@ -1,0 +1,162 @@
+#!/usr/bin/env node
+
+const del = require('del')
+const spawn = require('ez-spawn').async
+const path = require('path')
+const glob = require('glob-promise')
+const mkdirp = require('mkdirp-promise')
+const { writeFile, readFile } = require('fs').promises
+
+const copyFile = (from, to, parent) => log(async logger => {
+  const made = await mkdirp(path.dirname(to))
+  if (made) {
+    logger.info(`Created parent ${made}`)
+  }
+  logger.info(`Copying ${from} to ${to}`)
+  await writeFile(to, await readFile(from))
+}, parent)
+
+const replaceAll = (filePattern, options, pattern, value, root) => log(async parent => {
+  const entries = await glob(filePattern, options)
+  parent.log(`Replacing ${pattern} with "${value}" in ${filePattern}`)
+  await Promise.all(entries.map(entry => log(async (logger) => {
+    const data = await readFile(entry, 'utf-8')
+    const newData = data.replace(pattern, value)
+    if (newData !== data) {
+      logger.info(`Updated ${entry}`)
+      await writeFile(entry, newData)
+    } else {
+      logger.info(`Nothing to replace in ${entry}`)
+    }
+  }, parent)))
+}, root)
+
+const spawnLog = (cmd, parent) => log(async logger => {
+  logger.info(`Running ${cmd}`)
+  const process = await spawn(cmd)
+  logger.info(`Finished [${process.status}]`)
+  return process
+}, parent)
+
+
+let currentLogger
+const loggerFifo = []
+
+class Logger {
+  constructor () {
+    this.msgFifo = []
+    this.childFifo = []
+  }
+  process (entry) {
+    if (this === currentLogger) {
+      if (entry.type === 'info') return console.info(entry.msg)
+      if (entry.type === 'log') return console.log(entry.msg)
+      if (entry.type === 'error') return console.error(entry.msg)
+      if (entry.type === 'warn') return console.warn(entry.msg)
+    } else {
+      this.msgFifo.push(entry)
+    }
+  }
+  activate () {
+    let entry
+    while (entry = this.msgFifo.shift()) {
+      this.process(entry)
+    }
+    if (this.flushed) {
+      this.flush()
+    }
+  }
+  log (msg) {
+    this.process({ type: 'log', msg })
+  }
+  info (msg) {
+    this.process({ type: 'info', msg })
+  }
+  error (msg) {
+    this.process({ type: 'error', msg })
+  }
+  warn (msg) {
+    this.process({ type: 'warn', msg })
+  }
+  child () {
+    const logger = new Logger()
+    this.childFifo.push(logger)
+    return logger
+  }
+  flush() {
+    this.flushed = true
+    if (currentLogger !== this) return
+    for (const logger of this.childFifo) {
+      loggerFifo.unshift(logger)
+    }
+    if (loggerFifo.length > 0) {
+      currentLogger = loggerFifo.shift()
+      currentLogger.activate()
+    } else {
+      currentLogger = undefined
+    }
+  }
+}
+
+async function log (op, logParent) {
+  let logger
+  if (logParent) {
+    logger = logParent.child()
+  } else {
+    logger = new Logger()
+    loggerFifo.push(logger)
+  }
+  if (!currentLogger) {
+    currentLogger = logger
+  }
+  const res = await op(logger)
+  logger.flush()
+  return res
+}
+
+(async function () {
+  console.log('Cleaning ./dist')
+  await del('./dist')
+  await mkdirp('./dist')
+  await Promise.all([
+    copyFile('./Readme.md', './dist/Readme.md'),
+    copyFile('./LICENSE', './dist/LICENSE'),
+    log(async (logger) => {
+      await spawnLog('npm run build-ts', logger)
+      await log(logger => Promise.all([
+        log(async (logger) => {
+          const entries = await glob('dist/**/__tests__')
+          logger.info(`Deleting dist/**/__tests__folder`)
+          await Promise.all(entries.map(entry => del(entry)))
+        }, logger),
+        replaceAll('dist/*/**/*.js.map', { ignore: '**/__tests__/**/*' }, /\.\.\/\.\.\/src/ig, '../src', logger),
+        replaceAll('dist/**/*.js.map', { ignore: '**/__tests__/**/*' }, /\.\.\/src/ig, './src', logger)
+      ]))
+    }),
+    log(async logger => {
+      logger.info('Copying source ts files')
+      const matches = await glob('**/*.ts', {
+        cwd: './src',
+        ignore: '**/__tests__/**/*'
+      })
+      await Promise.all(matches.map(match => copyFile(`./src/${match}`, `./dist/src/${match}`, logger)))
+    }),
+    log(async logger => {
+      logger.info('Reducing ./package.json ...')
+      const packageRaw = await readFile('./package.json', 'utf-8')
+      const package = JSON.parse(packageRaw)
+      delete package.private
+      delete package.scripts
+      delete package.devDependencies
+      delete package.jest
+      delete package.eslintConfig
+      delete package.eslintIgnore
+      await writeFile('./dist/package.json', JSON.stringify(package, null, 2))
+      logger.info(`Wrote ./dist/package.json`)
+    })
+  ])
+})()
+  .catch(err => {
+    console.error(err.stack)
+    process.exit(1)
+  })
