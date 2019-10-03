@@ -1,5 +1,5 @@
 {
-  "name": "@martinheidegger/pack-ts",
+  "name": "@leichtgewicht/pack-ts",
   "version": "1.0.0",
   "description": "Optionionated pack script for typescript libraries",
   "main": "./bin/pack-ts",
