@@ -1,10 +1,10 @@
-# @martinheidegger/pack-ts
+# @leichtgewicht/pack-ts
 
 Package script for typescript libraries. Prepares a `./dist` folder with reduced `package.json` that can then be published
 
 
 ```bash
-npx @martinheidegger/pack-ts
+npx @leichtgewicht/pack-ts
 ```
 
 ## Warning: very opinionated built tool
