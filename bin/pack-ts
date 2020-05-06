@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 
 const del = require('del')
-const spawn = require('ez-spawn').async
+const spawn = require('@jsdevtools/ez-spawn').async
 const path = require('path')
 const glob = require('glob-promise')
-const mkdirp = require('mkdirp-promise')
 const { writeFile, readFile } = require('fs').promises
+
+const { mkdir } = require('fs').promises
+const mkdirp = (path) => mkdir(path, { recursive: true })
 
 const copyFile = (from, to, parent) => log(async logger => {
   const made = await mkdirp(path.dirname(to))
