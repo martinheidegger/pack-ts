@@ -1,10 +1,12 @@
 {
   "name": "@leichtgewicht/pack-ts",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Optionionated pack script for typescript libraries",
   "main": "./bin/pack-ts",
   "scripts": {
-    "lint": "standard"
+    "test": "npm run test:lint",
+    "test:lint": "standard",
+    "release": "npm run test && standard-version"
   },
   "bin": {
     "pack-ts": "./bin/pack-ts"
@@ -24,7 +26,8 @@
     "glob-promise": "^3.4.0"
   },
   "devDependencies": {
-    "standard": "^14.3.3"
+    "standard": "^14.3.3",
+    "standard-version": "^8.0.0"
   },
   "repository": {
     "type": "git",
