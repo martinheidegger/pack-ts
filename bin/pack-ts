@@ -4,69 +4,74 @@ const del = require('del')
 const spawn = require('@jsdevtools/ez-spawn').async
 const path = require('path')
 const glob = require('glob-promise')
-const { writeFile, readFile } = require('fs').promises
+const fs = require('fs').promises
 
-const { mkdir } = require('fs').promises
-const mkdirp = (path) => mkdir(path, { recursive: true })
+const clean = (path, logger) => logger.child(`Cleaning directory ${path}`, async () => {
+  await del(path)
+  await fs.mkdir(path, { recursive: true })
+})
 
-const copyFile = (from, to, parent) => log(async logger => {
-  const made = await mkdirp(path.dirname(to))
+const writeFile = (target, data, logger) => logger.child(`Writing ${target}`, async () => fs.writeFile(target, data))
+const readFile = (target, data, logger) => logger.child(`Reading ${target}`, async () => fs.readFile(target, data))
+
+const copyFile = (from, to, parentLog) => parentLog.child(`Copy ${from} → ${to}`, async logger => {
+  const made = await fs.mkdir(path.dirname(to), { recursive: true })
   if (made) {
     logger.info(`Created parent ${made}`)
   }
-  logger.info(`Copying ${from} to ${to}`)
-  await writeFile(to, await readFile(from))
-}, parent)
+  await fs.writeFile(to, await fs.readFile(from))
+})
 
-const replaceAll = (filePattern, options, pattern, value, root) => log(async parent => {
+const replaceAll = (filePattern, options, pattern, value, allLogger) => allLogger.child(`Replacing ${pattern} with "${value}" in ${filePattern}`, async logger => {
   const entries = await glob(filePattern, options)
-  parent.log(`Replacing ${pattern} with "${value}" in ${filePattern}`)
-  await Promise.all(entries.map(entry => log(async (logger) => {
-    const data = await readFile(entry, 'utf-8')
+  await Promise.all(entries.map(entry => async () => {
+    const data = await fs.readFile(entry, 'utf-8')
     const newData = data.replace(pattern, value)
     if (newData !== data) {
       logger.info(`Updated ${entry}`)
-      await writeFile(entry, newData)
+      await fs.writeFile(entry, newData, logger)
     } else {
       logger.info(`Nothing to replace in ${entry}`)
     }
-  }, parent)))
-}, root)
+  }))
+})
 
-const spawnLog = (cmd, parent) => log(async logger => {
-  logger.info(`Running ${cmd}`)
+const spawnLog = (cmd, parentLog) => parentLog.child(`Spawning ${cmd}`, async logger => {
   const process = await spawn(cmd)
   logger.info(`Finished [${process.status}]`)
   return process
-}, parent)
-
+})
 
 let currentLogger
-const loggerFifo = []
+
+function activate (logger) {
+  currentLogger = logger
+  if (currentLogger) {
+    currentLogger.flushMsgs()
+  }
+}
 
 class Logger {
-  constructor () {
-    this.msgFifo = []
-    this.childFifo = []
+  constructor (name, parent) {
+    this.fifo = []
+    this.name = name
+    this.parent = parent
+    this.indent = parent ? `${parent.indent}─` : ''
+    this._process({ type: 'log', msg: `${this.indent}→ ${name}` })
   }
-  process (entry) {
+  _process (entry) {
     if (this === currentLogger) {
+      if (entry.type === 'child') return activate(entry.logger)
       if (entry.type === 'info') return console.info(entry.msg)
       if (entry.type === 'log') return console.log(entry.msg)
       if (entry.type === 'error') return console.error(entry.msg)
       if (entry.type === 'warn') return console.warn(entry.msg)
     } else {
-      this.msgFifo.push(entry)
+      this.fifo.push(entry)
     }
   }
-  activate () {
-    let entry
-    while (entry = this.msgFifo.shift()) {
-      this.process(entry)
-    }
-    if (this.flushed) {
-      this.flush()
-    }
+  process (entry) {
+    this._process({ ...entry, msg: `${this.indent}── ${String(entry.msg).replace(/\n/g, `\n${this.indent}  ` )}` })
   }
   log (msg) {
     this.process({ type: 'log', msg })
@@ -80,84 +85,82 @@ class Logger {
   warn (msg) {
     this.process({ type: 'warn', msg })
   }
-  child () {
-    const logger = new Logger()
-    this.childFifo.push(logger)
-    return logger
-  }
-  flush() {
-    this.flushed = true
+  flushMsgs () {
     if (currentLogger !== this) return
-    for (const logger of this.childFifo) {
-      loggerFifo.unshift(logger)
+    while (this.fifo.length > 0) {
+      this._process(this.fifo.shift())
+      if (currentLogger !== this) {
+        return
+      }
     }
-    if (loggerFifo.length > 0) {
-      currentLogger = loggerFifo.shift()
-      currentLogger.activate()
-    } else {
-      currentLogger = undefined
+    if (this.closed) {
+      activate(this.parent)
     }
+  }
+  async child (name, op) {
+    const logger = new Logger(name, this)
+    this._process({ type: 'child', logger })
+    const res = await op(logger)
+    logger.close()
+    return res
+  }
+  close () {
+    this.closed = true
+    this.flushMsgs()
   }
 }
 
-async function log (op, logParent) {
-  let logger
-  if (logParent) {
-    logger = logParent.child()
-  } else {
-    logger = new Logger()
-    loggerFifo.push(logger)
+async function log (name, op) {
+  const logger = new Logger(name, null)
+  if (currentLogger) {
+    throw new Error('Only one root logger allowed.')
   }
-  if (!currentLogger) {
-    currentLogger = logger
-  }
-  const res = await op(logger)
-  logger.flush()
+  currentLogger = logger
+  logger.flushMsgs()
+  let res = await op(logger)
+  logger.close()
   return res
 }
 
-(async function () {
-  console.log('Cleaning ./dist')
-  await del('./dist')
-  await mkdirp('./dist')
+log('pack-ts', async main => {
+  await clean('./dist', main)
   await Promise.all([
-    copyFile('./Readme.md', './dist/Readme.md'),
-    copyFile('./LICENSE', './dist/LICENSE'),
-    log(async (logger) => {
+    copyFile('./Readme.md', './dist/Readme.md', main),
+    copyFile('./LICENSE', './dist/LICENSE', main),
+    main.child('Building typescript', async logger => {
       await spawnLog('npm run build-ts', logger)
-      await log(logger => Promise.all([
-        log(async (logger) => {
+      await Promise.all([
+        logger.child(`Deleting ./dist/**/__tests__ folder`, async () => {
           const entries = await glob('dist/**/__tests__')
-          logger.info(`Deleting dist/**/__tests__folder`)
           await Promise.all(entries.map(entry => del(entry)))
-        }, logger),
+        }),
         replaceAll('dist/*/**/*.js.map', { ignore: '**/__tests__/**/*' }, /\.\.\/\.\.\/src/ig, '../src', logger),
         replaceAll('dist/**/*.js.map', { ignore: '**/__tests__/**/*' }, /\.\.\/src/ig, './src', logger)
-      ]))
+      ])
     }),
-    log(async logger => {
-      logger.info('Copying source ts files')
+    main.child('Copying source ts files from ./src → ./dist/src', async logger => {
+      logger.info('Looking for ./src/**/*.ts files.')
       const matches = await glob('**/*.ts', {
         cwd: './src',
         ignore: '**/__tests__/**/*'
       })
       await Promise.all(matches.map(match => copyFile(`./src/${match}`, `./dist/src/${match}`, logger)))
     }),
-    log(async logger => {
-      logger.info('Reducing ./package.json ...')
-      const packageRaw = await readFile('./package.json', 'utf-8')
+    main.child('Reducing ./package.json', async logger => {
+      const packageRaw = await readFile('./package.json', 'utf-8', logger)
       const package = JSON.parse(packageRaw)
+      logger.info('Removing irrelevant package.json properties.')
       delete package.private
       delete package.scripts
       delete package.devDependencies
       delete package.jest
       delete package.eslintConfig
       delete package.eslintIgnore
-      await writeFile('./dist/package.json', JSON.stringify(package, null, 2))
-      logger.info(`Wrote ./dist/package.json`)
+      await writeFile('./dist/package.json', JSON.stringify(package, null, 2), logger)
     })
   ])
-})()
+  main.info('done.')
+})
   .catch(err => {
     console.error(err.stack)
     process.exit(1)
