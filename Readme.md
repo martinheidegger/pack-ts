@@ -7,7 +7,7 @@ Package script for typescript libraries. Prepares a `./dist` folder with reduced
 npx @leichtgewicht/pack-ts
 ```
 
-## Warning: very opinionated built tool
+## Warning: very opinionated build tool
 
 This tool:
 
